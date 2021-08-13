@@ -10,8 +10,9 @@ from ryu.lib.packet import lldp
 
 import numpy as np
 import time
+import networkx as nx
 
-SWITCH_NO = 4
+SWITCH_NO = 14
 
 
 
@@ -24,9 +25,11 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.mac_to_port = {}  # arp
         self.datapaths = {}    # save switches information
         self.port_number = {}
-        self.sw_port_to_sw_port = [] 
+        self.sw_port_to_sw_port = {}
         self.start_ij = np.zeros(SWITCH_NO)  # timer
         self.delay_ij = np.zeros((SWITCH_NO,SWITCH_NO))
+
+        self.G = nx.Graph()  # networkx
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -52,6 +55,9 @@ class SimpleSwitch13(app_manager.RyuApp):
 
         # get switch's port information
         self.send_port_stats_request(datapath)
+
+        # add node (networkx)
+        self.G.add_node(datapath.id)
 
     def send_port_stats_request(self, datapath):
         ofp = datapath.ofproto
@@ -87,7 +93,6 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.logger.debug("------------------------------------------------------------\n%s\n------------------------------------------------------------",pkt)
         
         pkt.serialize()
-        
         data = pkt.data
         self.logger.debug(data)
         parser = datapath.ofproto_parser
@@ -141,23 +146,18 @@ class SimpleSwitch13(app_manager.RyuApp):
         if eth.ethertype == ether_types.ETH_TYPE_IPV6:
             # ignore IPV6 packet
             return
-        if eth.ethertype == ether_types.ETH_TYPE_LLDP:
+        if eth.ethertype == ether_types.ETH_TYPE_LLDP:  # dump flow Packet-In
             self.logger.debug("Packet-In LLDP\n")
             self.logger.debug("switch:  %d",datapath.id)
             pkt_lldp = pkt.get_protocol(lldp.lldp)
-            #self.handle_lldp(datapath, in_port, eth, pkt_lldp)
-            self.logger.debug(pkt_lldp)
-            i = int.from_bytes(pkt_lldp.tlvs[0].chassis_id,"big") - 1
-            j = datapath.id - 1
-            self.delay_ij[i][j] = float(time.time()) - self.start_ij[i]
-            self.logger.debug(self.delay_ij)
+            self.estimate_link_delay(datapath,pkt_lldp)
+            self.setup_topo(datapath, in_port, pkt_lldp)
             return 
         dst = eth.dst
         src = eth.src
 
         dpid = format(datapath.id, "d").zfill(16)
         self.mac_to_port.setdefault(dpid, {})
-
         self.logger.info("packet in %s %s %s %s", dpid, src, dst, in_port)
 
         # learn a mac address to avoid FLOOD next time.
@@ -185,13 +185,20 @@ class SimpleSwitch13(app_manager.RyuApp):
         out = parser.OFPPacketOut(datapath=datapath, buffer_id=msg.buffer_id,
                                   in_port=in_port, actions=actions, data=data)
         datapath.send_msg(out)
-    '''
-    def handle_lldp(self, datapath, port, pkt_ethernet, pkt_lldp):
-        swp1 = ["s"+str(datapath.id), "port "+str(port)]
-        swp2 = ["s"+str(pkt_lldp.tlvs[0].chassis_id), "port "+str(pkt_lldp.tlvs[1].port_id)]
-        self.sw_port_to_sw_port.append([swp1, swp2])
-        print(self.sw_port_to_sw_port)
-    '''
+    
+    def setup_topo(self, datapath, port, pkt_lldp):
+        i = int.from_bytes(pkt_lldp.tlvs[0].chassis_id,"big")
+        j = datapath.id
+        self.G.add_edge(i,j)
+        self.sw_port_to_sw_port.setdefault(j,{})
+        self.sw_port_to_sw_port[j][i] = port
+    
+
+    def estimate_link_delay(self,datapath,pkt_lldp):
+        i = int.from_bytes(pkt_lldp.tlvs[0].chassis_id,"big") - 1
+        j = datapath.id - 1
+        self.delay_ij[i][j] = float(time.time()) - self.start_ij[i]
+        self.logger.debug(self.delay_ij)
 
     @set_ev_cls(ofp_event.EventOFPFlowRemoved, MAIN_DISPATCHER)
     def _flow_removed_handler(self, ev):
@@ -215,8 +222,6 @@ class SimpleSwitch13(app_manager.RyuApp):
                                           ofproto.OFPCML_NO_BUFFER)]
         match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_LLDP)
         self.add_flow(datapath, 0, match, actions,hard_timeout=1)
-
-
 
 
 
