@@ -32,16 +32,16 @@ def Test_topo():
     h2 = net.addHost("h2",mac="00:00:00:00:00:02")
     h3 = net.addHost("h3",mac="00:00:00:00:00:03")
     h4 = net.addHost("h4",mac="00:00:00:00:00:04")
-    h5 = net.addHost("h5",mac="00:00:00:00:00:01")
-    h6 = net.addHost("h6",mac="00:00:00:00:00:02")
-    h7 = net.addHost("h7",mac="00:00:00:00:00:03")
-    h8 = net.addHost("h8",mac="00:00:00:00:00:04")
-    h9 = net.addHost("h9",mac="00:00:00:00:00:01")
-    h10 = net.addHost("h10",mac="00:00:00:00:00:02")
-    h11 = net.addHost("h11",mac="00:00:00:00:00:03")
-    h12 = net.addHost("h12",mac="00:00:00:00:00:04")
-    h13 = net.addHost("h13",mac="00:00:00:00:00:01")
-    h14 = net.addHost("h14",mac="00:00:00:00:00:02")
+    h5 = net.addHost("h5",mac="00:00:00:00:00:05")
+    h6 = net.addHost("h6",mac="00:00:00:00:00:06")
+    h7 = net.addHost("h7",mac="00:00:00:00:00:07")
+    h8 = net.addHost("h8",mac="00:00:00:00:00:08")
+    h9 = net.addHost("h9",mac="00:00:00:00:00:09")
+    h10 = net.addHost("h10",mac="00:00:00:00:00:10")
+    h11 = net.addHost("h11",mac="00:00:00:00:00:11")
+    h12 = net.addHost("h12",mac="00:00:00:00:00:12")
+    h13 = net.addHost("h13",mac="00:00:00:00:00:13")
+    h14 = net.addHost("h14",mac="00:00:00:00:00:14")
 
     info("*** Add Link ***\n")
     net.addLink(s1,h1,bw=0.01)
@@ -83,9 +83,25 @@ def Test_topo():
 
     info("*** Network Start ***\n")
     net.start()
-    CLI(net)
-    net.stop()
+    # CLI(net)
+    # net.stop()
+    return net
+def generate(net):
+    h1 = net.get('h1')
+    print(h1.cmd('ping 10.0.0.2 -s 1000 -c 1'))
+    
 
 if __name__ == "__main__":
-    setLogLevel("debug")
-    Test_topo()
+    setLogLevel("info")
+    net = Test_topo()
+
+    while 1:
+        input = raw_input('CLI/GEN/QUIT')
+        if input.upper() == 'CLI':
+            CLI(net)
+        elif input.upper() == 'GEN':
+            generate(net)
+        elif input.upper() == 'QUIT':
+            net.stop()
+            break
+    
