@@ -8,7 +8,8 @@ from ryu.lib.packet import ethernet
 from ryu.lib.packet import ether_types
 from ryu.lib.packet import lldp
 from ryu.lib.packet import arp
-
+from ryu.lib import hub
+from operator import attrgetter
 import numpy as np
 import time
 import networkx as nx
@@ -26,11 +27,52 @@ class SimpleSwitch13(app_manager.RyuApp):
         self.mac_to_port = {}  # arp
         self.datapaths = {}    # save switches information
         self.port_number = {}
-        self.sw_port_to_sw_port = {}
+        self.sw_port_to_sw_port = {}  # find port between switches
+        self.sw_port_to_sw = {} # use switch & port find connect switch
         self.start_ij = np.zeros(SWITCH_NO)  # timer
         self.delay_ij = np.zeros((SWITCH_NO,SWITCH_NO))
-
+        self.monitor_thread = hub.spawn(self._monitor)
         self.G = nx.Graph()  # networkx
+        self.state_post = np.zeros((SWITCH_NO,SWITCH_NO))
+        self.state = np.zeros((SWITCH_NO,SWITCH_NO))
+
+    def _monitor(self):
+        while True:
+            for dp in self.datapaths.values():
+                self._request_stats(dp)
+            print(self.state.astype(int))
+            hub.sleep(1)
+
+    def _request_stats(self, datapath):
+
+        ofproto = datapath.ofproto
+        parser = datapath.ofproto_parser
+
+        # req = parser.OFPFlowStatsRequest(datapath)
+        # datapath.send_msg(req)
+        req = parser.OFPPortStatsRequest(datapath, 0, ofproto.OFPP_ANY)
+        datapath.send_msg(req)
+
+    @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
+    def _port_stats_reply_handler_(self, ev):
+        body = ev.msg.body
+        # self.logger.info('datapath         port     '
+        #                  'rx-pkts  rx-bytes rx-error '
+        #                  'tx-pkts  tx-bytes tx-error')
+        # self.logger.info('---------------- -------- '
+        #                  '-------- -------- -------- '
+        #                  '-------- -------- --------')
+        for stat in sorted(body, key=attrgetter('port_no')):
+            # self.logger.info('%016x %8x %8d %8d %8d %8d %8d %8d',
+            #                  ev.msg.datapath.id, stat.port_no,
+            #                  stat.rx_packets, stat.rx_bytes, stat.rx_errors,
+            #                  stat.tx_packets, stat.tx_bytes, stat.tx_errors)
+            i = ev.msg.datapath.id - 1
+            if stat.port_no == 4294967294 or stat.port_no == 1:
+                continue
+            j = self.sw_port_to_sw[ev.msg.datapath.id][stat.port_no] - 1
+            self.state[i][j] = 10240 - (8*stat.tx_bytes - self.state_post[i][j])
+            self.state_post[i][j] = 8*stat.tx_bytes
 
     @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
     def switch_features_handler(self, ev):
@@ -235,7 +277,9 @@ class SimpleSwitch13(app_manager.RyuApp):
         j = datapath.id
         self.G.add_edge(i,j)
         self.sw_port_to_sw_port.setdefault(j,{})
+        self.sw_port_to_sw.setdefault(j,{})
         self.sw_port_to_sw_port[j][i] = port
+        self.sw_port_to_sw[j][port] = i
     
 
     def estimate_link_delay(self,datapath,pkt_lldp):
@@ -264,6 +308,3 @@ class SimpleSwitch13(app_manager.RyuApp):
                                           ofproto.OFPCML_NO_BUFFER)]
         match = parser.OFPMatch(eth_type=ether_types.ETH_TYPE_LLDP)
         self.add_flow(datapath, 0, match, actions,hard_timeout=1)
-
-
-
